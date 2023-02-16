@@ -2,5 +2,5 @@
 
 all: clean install
 
-install: 
+install:
 	ant
