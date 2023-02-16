@@ -62,6 +62,7 @@ import org.rsna.ctp.stdstages.anonymizer.IntegerTable;
 
 import org.rsna.util.FileUtil;
 import org.rsna.util.StringUtil;
+import org.rsna.ctp.stdstages.anonymizer.dicom.util.FileNameUtil;
 
 import org.apache.log4j.Logger;
 
@@ -113,6 +114,41 @@ public class DICOMAnonymizer {
 			IntegerTable intTable,
 			boolean forceIVRLE,
 			boolean renameToSOPIUID) {
+		return anonymize(inFile, outFile, cmds, lkup, intTable, forceIVRLE, renameToSOPIUID, null);
+	}
+			
+	/**
+     * Anonymizes the input file, writing the result to the output file.
+     * The input and output files are allowed to be the same.
+     * The fields to anonymize are scripted in the properties file.
+     * <p>
+     * Important note: if the script generates a skip() or quarantine()
+     * function call, the output file is not written and the input file
+     * is unmodified, even if it is the same as the output file.
+     * @param inFile the file to anonymize.
+     * @param outFile the output file.  It may be same as inFile if you want
+     * to anonymize in place.
+     * @param cmds the properties object containing the anonymization commands.
+     * @param lkup the properties object containing the local lookup table; null
+     * if local lookup is not to be used.
+     * @param intTable the integer table containing integer remappings for elements.
+     * @param forceIVRLE force the transfer syntax to IVRLE if true; leave
+     * the syntax unmodified if false.
+     * @param renameToSOPIUID rename the output file to [SOPInstanceUID].dcm, where
+     * [SOPInstanceUID] is the value in the anonymized object (in case it is
+     * remapped during anonymization.
+	 * @param outPattern reanme the output file to a given format containing dicom tags
+     * @return the static status result
+     */
+    public static AnonymizerStatus anonymize(
+			File inFile,
+			File outFile,
+			Properties cmds,
+			Properties lkup,
+			IntegerTable intTable,
+			boolean forceIVRLE,
+			boolean renameToSOPIUID,
+			String outPattern) {
 
 		String exceptions = "";
 		BufferedInputStream in = null;
@@ -207,43 +243,76 @@ public class DICOMAnonymizer {
 
 			//Write the pixels if the parser actually stopped before pixeldata
 			logger.debug("Parser stopped at "+Tags.toString(parser.getReadTag()));
+
+			//Set the PixelData script to "@remove()" to remove PixelData completely
+			boolean skipPixelData = (context.getScriptFor(Tags.PixelData) != null &&
+			context.getScriptFor(Tags.PixelData).equalsIgnoreCase("@remove()"));
+
             if (parser.getReadTag() == Tags.PixelData) {
-                dataset.writeHeader(
-                    out,
-                    encoding,
-                    parser.getReadTag(),
-                    parser.getReadVR(),
-                    parser.getReadLength());
-                if (encoding.encapsulated) {
-                    parser.parseHeader();
-                    while (parser.getReadTag() == Tags.Item) {
-                        dataset.writeHeader(
+				if (skipPixelData) {
+                    // New for STAR-3707
+                    InputStream is = parser.getInputStream();
+                    int readLength = parser.getReadLength();
+                    if (encoding.encapsulated) {
+                        parser.parseHeader();
+                        while (parser.getReadTag() == Tags.Item) {
+                            while (readLength > 0) {
+                                readLength -= is.skip(readLength);
+                            }
+                            parser.parseHeader();
+                            readLength = parser.getReadLength();
+                        }
+                        if (parser.getReadTag() != Tags.SeqDelimitationItem) {
+                            throw new Exception(
+                                    "Unexpected Tag: " + Tags.toString(parser.getReadTag()));
+                        }
+                        if (parser.getReadLength() != 0) {
+                            throw new Exception(
+                                    "(fffe,e0dd), Length:" + parser.getReadLength());
+                        }
+                    } else {
+                        while (readLength > 0) {
+                            readLength -= is.skip(readLength);
+                        }
+                    }
+                } else {
+                	dataset.writeHeader(
+                    	out,
+                    	encoding,
+                    	parser.getReadTag(),
+                    	parser.getReadVR(),
+                    	parser.getReadLength());
+                	if (encoding.encapsulated) {
+                    	parser.parseHeader();
+                    	while (parser.getReadTag() == Tags.Item) {
+                        	dataset.writeHeader(
                             out,
                             encoding,
                             parser.getReadTag(),
                             parser.getReadVR(),
                             parser.getReadLength());
-                        writeValueTo(parser, buffer, out, false);
-                        parser.parseHeader();
-                    }
-                    if (parser.getReadTag() != Tags.SeqDelimitationItem) {
+                        	writeValueTo(parser, buffer, out, false);
+                        	parser.parseHeader();
+                    	}
+                    	if (parser.getReadTag() != Tags.SeqDelimitationItem) {
                         throw new Exception(
                             "Unexpected Tag: " + Tags.toString(parser.getReadTag()));
-                    }
-                    if (parser.getReadLength() != 0) {
+                    	}
+                    	if (parser.getReadLength() != 0) {
                         throw new Exception(
                             "(fffe,e0dd), Length:" + parser.getReadLength());
-                    }
-                    dataset.writeHeader(
-                        out,
-                        encoding,
-                        Tags.SeqDelimitationItem,
-                        VRs.NONE,
-                        0);
-                } 
-                else {
-                    writeValueTo(parser, buffer, out, swap && (parser.getReadVR() == VRs.OW));
-                }
+                    	}
+                    	dataset.writeHeader(
+                        	out,
+                        	encoding,
+                        	Tags.SeqDelimitationItem,
+                        	VRs.NONE,
+                        	0);
+                		} 
+                	else {
+                    	writeValueTo(parser, buffer, out, swap && (parser.getReadVR() == VRs.OW));
+                	}
+				}
                 parser.parseHeader();
 			}
 			
@@ -346,7 +415,11 @@ public class DICOMAnonymizer {
 			in.close();
 
 			//Rename the temp file to the specified outFile.
-			if (renameToSOPIUID) outFile = new File(outFile.getParentFile(),sopiUID+".dcm");
+			if (renameToSOPIUID) 
+				outFile = new File(outFile.getParentFile(),sopiUID+".dcm");
+			else if (outPattern != null) 
+				outFile = FileNameUtil.generateOutputFileWithDicomDir(dataset, outPattern, outFile);
+
 			if (outFile.exists() && !outFile.delete()) {
 				logger.warn("Unable to delete " + outFile);
 			}
