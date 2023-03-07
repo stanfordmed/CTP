@@ -114,7 +114,7 @@ public class DICOMAnonymizer {
 			IntegerTable intTable,
 			boolean forceIVRLE,
 			boolean renameToSOPIUID) {
-		return anonymize(inFile, outFile, cmds, lkup, intTable, forceIVRLE, renameToSOPIUID, null);
+		return anonymize(inFile, outFile, cmds, lkup, intTable, forceIVRLE, renameToSOPIUID, null, null);
 	}
 			
 	/**
@@ -140,7 +140,7 @@ public class DICOMAnonymizer {
 	 * @param outPattern reanme the output file to a given format containing dicom tags
      * @return the static status result
      */
-    public static AnonymizerStatus anonymize(
+    public static AnonymizerStatus anonymize( 
 			File inFile,
 			File outFile,
 			Properties cmds,
@@ -148,6 +148,7 @@ public class DICOMAnonymizer {
 			IntegerTable intTable,
 			boolean forceIVRLE,
 			boolean renameToSOPIUID,
+			File outParentPath,
 			String outPattern) {
 
 		String exceptions = "";
@@ -414,23 +415,39 @@ public class DICOMAnonymizer {
 			out.close();
 			in.close();
 
+			File newOutFile = null;
 			//Rename the temp file to the specified outFile.
 			if (renameToSOPIUID) 
 				outFile = new File(outFile.getParentFile(),sopiUID+".dcm");
 			else if (outPattern != null) 
-				outFile = FileNameUtil.generateOutputFileWithDicomDir(dataset, outPattern, outFile);
+				newOutFile = FileNameUtil.generateOutputFile(outParentPath, dataset, outPattern, outFile);
 
 			if (outFile.exists() && !outFile.delete()) {
+				logger.info("Unable to delete : " + outFile.getName());
 				logger.warn("Unable to delete " + outFile);
 			}
-			if (!tempFile.renameTo(outFile)) {
+			if(newOutFile != null && newOutFile.exists() && !newOutFile.delete()) {
+				logger.info("Unable to delete : " + newOutFile.getName());
+				logger.warn("Unable to delete " + newOutFile);
+			}
+			if(newOutFile != null) {
+				if (!tempFile.renameTo(newOutFile)) {
+					logger.info("Unable to reanme : " + tempFile.getName() + " to : " + newOutFile.getName());
+					logger.warn("Unable to rename "+ tempFile + " to " + newOutFile);
+				}
+			}
+			else if (!tempFile.renameTo(outFile)) {
+				logger.info("Unable to reanme : " + tempFile.getName() + " to : " + outFile.getName());
 				logger.warn("Unable to rename "+ tempFile + " to " + outFile);
 			}
 		}
 
 		catch (Exception e) {
+			e.printStackTrace();
 			FileUtil.close(in);
 			FileUtil.close(out);
+			if (outFile.exists())
+				outFile.delete();
 			FileUtil.deleteAll(tempFile);
 			//Now figure out what kind of response to return.
 			String msg = e.getMessage();
@@ -451,6 +468,13 @@ public class DICOMAnonymizer {
 			logger.info("Unknown exception from "+inFile, e);
 			return AnonymizerStatus.QUARANTINE(inFile,msg);
 		}
+		catch (Throwable t) {
+			t.printStackTrace();
+			if (outFile.exists())
+				outFile.delete();
+			FileUtil.deleteAll(tempFile);
+			return AnonymizerStatus.QUARANTINE(inFile,t.getMessage());
+		} 
 		return AnonymizerStatus.OK(outFile, exceptions);
     }
     
