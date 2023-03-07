@@ -49,8 +49,8 @@ public class FileNameUtil {
 	 * @param outFile - Out file created before
 	 * @return - output file created matching to supplied pattern
 	 */
-    public static File generateOutputFileWithDicomDir(final Dataset dataset, final String outPattern, File outFile) {
-		File parentFolder = outFile.getParentFile();
+    public static File generateOutputFile(final File outParentPath, final Dataset dataset, final String outPattern, File outFile) {
+		File parentFolder = outParentPath;
 
 		// Look for the folder hierarchy first, replace with the tag values found and create the folder hierarchy 
 		StringTokenizer formatTokens = new StringTokenizer(outPattern, "/");
@@ -78,9 +78,9 @@ public class FileNameUtil {
 		String outfileName = matchAndReplace(dataset, fileNamePattern);
 		System.out.println("outfileName:" + outfileName);
 		if (outfileName != null && !outfileName.isEmpty()) {
-			outFile = new File(parentFolder, outfileName);
-			LOGGER.info(String.format("Created output file :%s", outFile.getName()));
-			return outFile;
+			File newOutFile = new File(parentFolder, outfileName);
+			LOGGER.info(String.format("Created output file :%s", newOutFile.getName()));
+			return newOutFile;
 		}
 		return null;
 	}
@@ -108,6 +108,7 @@ public class FileNameUtil {
         }
 		for (String key : replacements.keySet())
 			outPattern = outPattern.replaceAll(key, replacements.get(key));
+		outPattern = outPattern.replaceAll(" ", "_");
 		return outPattern;
 	}
 }

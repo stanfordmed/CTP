@@ -230,8 +230,8 @@ public class DICOMPixelAnonymizer {
 			return AnonymizerStatus.OK(outFile,"");
 		}
 
-		catch (Exception e) {
-			logger.debug("Exception while processing image.",e);
+		catch (Throwable e) {
+			logger.warn("Exception while processing image.",e);
 
 			//Close the input stream if it actually got opened.
 			close(in);
@@ -241,6 +241,7 @@ public class DICOMPixelAnonymizer {
 			try {
 				if (out != null) {
 					out.close();
+					outFile.delete();
 					tempFile.delete();
 				}
 			}
